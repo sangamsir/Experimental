@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>JARVIS 0.97 Inch OLED Simulator</title>
+<style>
+:root{--c:#00ffd0;--g:#00ff66;--bg:#020706}
+*{box-sizing:border-box}
+body{margin:0;background:#090b0d;color:#dff;font-family:monospace;display:flex;min-height:100vh;align-items:center;justify-content:center;flex-direction:column;gap:18px}
+.wrap{display:flex;flex-direction:column;align-items:center;gap:12px}
+.oled{
+ width:512px;height:256px; /* 3x magnified representation of actual 128x64 */
+ background:#000;border:8px solid #24282b;border-radius:13px;
+ box-shadow:0 0 0 2px #101416,0 0 35px #00cfa055;
+ position:relative;overflow:hidden;image-rendering:pixelated;
+}
+.screen{position:absolute;inset:0;background:#000;color:var(--c);overflow:hidden}
+.screen:after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(to bottom,transparent 0,transparent 2px,#00ffd008 3px);mix-blend-mode:screen}
+canvas{width:100%;height:100%;display:block;image-rendering:pixelated}
+.controls{width:min(92vw,420px);display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+button,input,select{background:#11181a;color:#bff;border:1px solid #168c7b;border-radius:7px;padding:9px;font-family:monospace}
+button{cursor:pointer}button:hover{background:#12352f}
+input{width:250px}
+.note{font-size:12px;color:#8a9b9a;text-align:center;max-width:420px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="oled"><div class="screen"><canvas id="oled" width="128" height="64"></canvas></div></div>
+  <div class="controls">
+    <button onclick="wake()">WAKE</button><button onclick="startWakeWord()">WAKE WORD ON</button><button onclick="stopWakeWord()">OFF</button>
+    <button onclick="listen()">LISTEN</button>
+    <button onclick="ask()">ASK AI</button>
+    <button onclick="telemetry()">STATUS</button>
+    <button onclick="config()">API KEY</button>
+  </div>
+  <div class="controls">
+    <input id="q" placeholder="प्रश्न लिखें या LISTEN दबाएँ">
+  </div>
+  <div class="note">यह असली 0.97-inch 128×64 OLED का 3× preview है। असली हार्डवेयर में यही 128×64 सामग्री फिट होगी—कोई बड़ी स्क्रीन नहीं।</div>
+</div>
+<script>
+const cv=document.getElementById('oled'),x=cv.getContext('2d');
+const W=128,H=64; let mode='idle',msg='',api=localStorage.jarvisKey||'',model='openai/gpt-oss-20b';
+let wakeListening=false,wakeRec=null;
+function clear(){x.fillStyle='#000';x.fillRect(0,0,W,H);x.fillStyle='#00ffd0';x.font='6px monospace';x.textBaseline='top'}
+function txt(t,a,b,size=6){x.font=size+'px monospace';x.fillText(t,a,b)}
+function center(t,y,size=6){x.font=size+'px monospace';x.fillText(t,Math.max(0,(W-x.measureText(t).width)/2),y)}
+function box(a,b,c,d){x.strokeStyle='#00ffd0';x.strokeRect(a,b,c,d)}
+function eyes(){x.strokeStyle='#00ffd0';x.lineWidth=1;x.beginPath();x.arc(48,30,7,Math.PI*.15,Math.PI*.85);x.arc(80,30,7,Math.PI*.15,Math.PI*.85);x.stroke();x.fillRect(45,28,3,3);x.fillRect(77,28,3,3)}
+function render(){
+ clear();
+ if(mode==='idle'){
+  txt('JARVIS',2,2,7); txt('● ONLINE',88,3,5);
+  txt(new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'}),37,12,11);
+  txt(new Date().toLocaleDateString('en-GB'),45,24,5); eyes();
+  txt('WIFI OK',2,56,5); txt('BAT '+battery()+'%',45,56,5); txt('MIC READY',91,56,5);
+ } else if(mode==='wake'){
+  center('YES SIR',13,10); center('SANGAM',27,10); center('I AM LISTENING',46,6);
+ } else if(mode==='listen'){
+  center('LISTENING...',5,8);
+  for(let i=0;i<32;i++){let h=3+Math.random()*16;x.fillRect(1+i*4,35-h/2,2,h)}
+  center('SPEAK NOW',55,6);
+ } else if(mode==='think'){
+  center('THINKING',7,8); center('JARVIS AI',23,6);
+  x.strokeStyle='#00ffd0';x.strokeRect(20,38,88,6);x.fillRect(22,40,Math.random()*84,2);
+  center('PROCESSING...',53,6);
+ } else if(mode==='speak'){
+  txt('JARVIS>',2,2,7); let lines=wrap(msg,20); lines.slice(0,7).forEach((l,i)=>txt(l,2,13+i*7,6));
+ } else if(mode==='status'){
+  txt('SYSTEM STATUS',20,3,8);txt('WIFI   : ONLINE',5,17,6);txt('BAT    : '+battery()+'%',5,27,6);txt('PING   : '+(30+Math.floor(Math.random()*35))+'ms',5,37,6);txt('MODE   : READY',5,47,6);txt('OLED   : 128x64',5,57,6);
+ }
+ requestAnimationFrame(render)
+}
+function battery(){return navigator.getBattery? '87':'--'}
+function wrap(s,n){let a=[];s=String(s||'').replace(/\s+/g,' ');while(s.length){a.push(s.slice(0,n));s=s.slice(n)}return a}
+function set(m){mode=m}
+function say(t){if(!('speechSynthesis'in window))return; speechSynthesis.cancel();let u=new SpeechSynthesisUtterance(t);u.lang='hi-IN';u.rate=.95;u.pitch=1;u.volume=1;speechSynthesis.speak(u)}
+function wake(){set('wake');say('Yes sir Sangam, boliye sun raha hoon');setTimeout(()=>set('listen'),1500)}
+function startWakeWord(){
+ if(wakeListening)return;
+ const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+ if(!SR){alert('इस ब्राउज़र में wake-word recognition उपलब्ध नहीं है।');return}
+ wakeListening=true;
+ set('wake');
+ wakeRec=new SR(); wakeRec.lang='en-IN'; wakeRec.continuous=true; wakeRec.interimResults=true;
+ wakeRec.onresult=e=>{
+   for(let i=e.resultIndex;i<e.results.length;i++){
+     const t=e.results[i][0].transcript.toLowerCase().trim();
+     if(/\\b(jarvis|जार्विस|jarvis ji)\\b/.test(t)){
+       wake(); setTimeout(()=>listen(),1700); break;
+     }
+   }
+ };
+ wakeRec.onerror=()=>{wakeListening=false;set('idle');setTimeout(()=>{if(!wakeListening) startWakeWord()},1000)};
+ wakeRec.onend=()=>{if(wakeListening)setTimeout(()=>{if(wakeListening) startWakeWord()},300)};
+ wakeRec.start();
+}
+function stopWakeWord(){wakeListening=false;if(wakeRec)wakeRec.stop();set('idle')}
+function listen(){
+ set('listen');
+ if('webkitSpeechRecognition'in window||'SpeechRecognition'in window){
+  let R=window.SpeechRecognition||window.webkitSpeechRecognition,r=new R();r.lang='hi-IN';r.interimResults=false;r.onresult=e=>{document.getElementById('q').value=e.results[0][0].transcript;ask()};r.onerror=()=>set('idle');r.start()
+ }else alert('इस ब्राउज़र में voice recognition उपलब्ध नहीं है।')
+}
+async function ask(){
+ let q=document.getElementById('q').value.trim();if(!q)return;
+ if(!api){config();return}
+ set('think');
+ try{
+  let r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+api},body:JSON.stringify({model,temperature:.5,max_tokens:180,messages:[{role:'system',content:'You are JARVIS. Reply briefly in Hindi, maximum 2-3 short sentences.'},{role:'user',content:q}]})});
+  let d=await r.json();if(!r.ok)throw Error(d.error?.message||('HTTP '+r.status));
+  msg=d.choices?.[0]?.message?.content||'उत्तर प्राप्त नहीं हुआ।';set('speak');say(msg);setTimeout(()=>set('idle'),9000)
+ }catch(e){msg='ERROR: '+e.message;set('speak');say('क्षमा कीजिए, कनेक्शन में समस्या है');setTimeout(()=>set('idle'),7000)}
+}
+function telemetry(){set('status');setTimeout(()=>set('idle'),5000)}
+function config(){let k=prompt('Groq API key डालें:',api);if(k!==null){api=k.trim();localStorage.jarvisKey=api}}
+render();
+</script>
+</body>
+</html>
